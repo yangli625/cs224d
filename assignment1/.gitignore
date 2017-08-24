@@ -3,6 +3,5 @@
 cbow/
 skipgram/
 .DS_Store
-*.pdf
 *.pyc
 *.npy

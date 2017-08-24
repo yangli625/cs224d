@@ -1,0 +1,7 @@
+.env
+.idea/
+cbow/
+skipgram/
+.DS_Store
+*.pyc
+*.npy
