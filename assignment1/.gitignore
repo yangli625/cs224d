@@ -1,5 +1,7 @@
 .env
 .idea/
+cbow/
+skipgram/
 .DS_Store
 *.pdf
 *.pyc

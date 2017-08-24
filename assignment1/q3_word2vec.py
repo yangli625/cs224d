@@ -10,7 +10,7 @@ def normalizeRows(x):
     # Implement a function that normalizes each row of a matrix to have unit length
     
     ### YOUR CODE HERE
-    x = x / np.sum(x, axis=1, keepdims=True)
+    x = x / np.sqrt(np.sum(x * x, axis=1, keepdims=True))
     ### END YOUR CODE
     
     return x
@@ -79,17 +79,15 @@ def negSamplingCostAndGradient(predicted, target, outputVectors, dataset,
     # assignment!
     
     ### YOUR CODE HERE
-    N, D = outputVectors.shape
-    sampledOutputVectors = np.zeros((K, D))
-    sampledInds = np.zeros((K,), dtype=np.int8)
+    sampledInds = []
     grad = np.zeros(outputVectors.shape)
-    for i in xrange(K):
+    for k in xrange(K):
         j = target
         while j == target:
             j = dataset.sampleTokenIdx()
-        sampledOutputVectors[i, :] = outputVectors[j, :]
-        sampledInds[i] = j
+        sampledInds.append(j)
 
+    sampledOutputVectors = outputVectors[sampledInds, :]
     out_target = sigmoid(outputVectors[target, :].dot(predicted.T))
     out_negative = sigmoid(-sampledOutputVectors.dot(predicted.T))
     cost = - np.log(out_target) - np.sum(np.log(out_negative), axis=0)

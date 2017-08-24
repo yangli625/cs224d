@@ -22,7 +22,7 @@ def softmax(x):
 
     ### YOUR CODE HERE
     dim = np.ndim(x)
-    x = x - np.amax(x, axis=dim-1, keepdims=True)
+    x -= np.amax(x, axis=dim-1, keepdims=True)
     x = np.exp(x)
     x = x / np.sum(x, axis=dim-1, keepdims=True)
 
