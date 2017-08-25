@@ -7,7 +7,7 @@ from utils import invert_dict
 from numpy import *
 
 def load_wv(vocabfile, wvfile):
-    wv = loadtxt(wvfile, dtype=float)
+    wv = loadtxt(wvfile, dtype=float32)
     with open(vocabfile) as fd:
         words = [line.strip() for line in fd]
     num_to_word = dict(enumerate(words))

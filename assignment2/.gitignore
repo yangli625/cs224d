@@ -1,7 +1,6 @@
 .env
 .idea/
-cbow/
-skipgram/
+weights/
 .DS_Store
 *.pyc
 *.npy
