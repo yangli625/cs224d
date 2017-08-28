@@ -9,7 +9,6 @@ from utils import calculate_perplexity, get_ptb_dataset, Vocab
 from utils import ptb_iterator, sample
 
 import tensorflow as tf
-from tensorflow.python.ops.seq2seq import sequence_loss
 from model import LanguageModel
 
 # Let's set the parameters of our model
@@ -81,7 +80,9 @@ class RNNLM_Model(LanguageModel):
         (Don't change the variable names)
         """
         ### YOUR CODE HERE
-        raise NotImplementedError
+        self.input_placeholder = tf.placeholder(dtype=tf.int32, shape=(None, self.config.num_steps))
+        self.labels_placeholder = tf.placeholder(dtype=tf.float32, shape=(None, self.config.num_steps))
+        self.dropout_placeholder = tf.placeholder(dtype=tf.float32, shape=())
         ### END YOUR CODE
 
     def add_embedding(self):
@@ -103,7 +104,12 @@ class RNNLM_Model(LanguageModel):
         # The embedding lookup is currently only implemented for the CPU
         with tf.device('/cpu:0'):
             ### YOUR CODE HERE
-            raise NotImplementedError
+            with tf.variable_scope("embedding"):
+                L = tf.get_variable("L", shape=(len(self.vocab), self.config.embed_size))
+            inputs = tf.nn.embedding_lookup(L, self.input_placeholder)
+            inputs = tf.split(inputs, self.config.num_steps, 1)
+            for i in range(len(inputs)):
+                inputs[i] = tf.squeeze(inputs[i], [1])
             ### END YOUR CODE
             return inputs
 
@@ -121,13 +127,20 @@ class RNNLM_Model(LanguageModel):
 
         Args:
           rnn_outputs: List of length num_steps, each of whose elements should be
-                       a tensor of shape (batch_size, embed_size).
+                       a tensor of shape (batch_size, hidden_size).
         Returns:
           outputs: List of length num_steps, each a tensor of shape
                    (batch_size, len(vocab)
         """
         ### YOUR CODE HERE
-        raise NotImplementedError
+        with tf.variable_scope("Projection"):
+            U = tf.get_variable("U", shape=(self.config.hidden_size, len(self.vocab)),
+                                initializer=tf.zeros_initializer)
+            b2 = tf.get_variable("b2", shape=(len(self.vocab),), initializer=tf.zeros_initializer)
+
+        outputs = []
+        for rnn_step in rnn_outputs:
+            outputs.append(tf.matmul(rnn_step, U) + b2)
         ### END YOUR CODE
         return outputs
 
@@ -142,7 +155,13 @@ class RNNLM_Model(LanguageModel):
           loss: A 0-d tensor (scalar)
         """
         ### YOUR CODE HERE
-        raise NotImplementedError
+        output = tf.transpose(output, [1, 0, 2])
+        target_weights = tf.ones((self.config.batch_size, self.config.num_steps))
+        loss = tf.contrib.seq2seq.sequence_loss(
+            output,
+            tf.to_int32(self.labels_placeholder),
+            target_weights
+        )
         ### END YOUR CODE
         return loss
 
@@ -166,7 +185,12 @@ class RNNLM_Model(LanguageModel):
           train_op: The Op for training.
         """
         ### YOUR CODE HERE
-        raise NotImplementedError
+        # this scope is necessary because of reuse scope in line 350
+        # https://github.com/tensorflow/tensorflow/issues/6220
+        # When you do tf.get_variable_scope().reuse_variables() you set the current scope to reuse variables. If you call the optimizer in such scope, it's trying to reuse slot variables, which it cannot find, so it throws an error.
+        with tf.variable_scope("optimizer"):
+            opt = tf.train.AdamOptimizer(learning_rate=self.config.lr)
+            train_op = opt.minimize(loss)
         ### END YOUR CODE
         return train_op
 
@@ -184,7 +208,7 @@ class RNNLM_Model(LanguageModel):
         self.predictions = [tf.nn.softmax(tf.cast(o, 'float64')) for o in self.outputs]
         # Reshape the output into len(vocab) sized chunks - the -1 says as many as
         # needed to evenly divide
-        output = tf.reshape(tf.concat(1, self.outputs), [-1, len(self.vocab)])
+        output = tf.reshape(tf.concat(self.outputs, 1), [self.config.num_steps, self.config.batch_size, len(self.vocab)])
         self.calculate_loss = self.add_loss_op(output)
         self.train_step = self.add_training_op(self.calculate_loss)
 
@@ -228,7 +252,23 @@ class RNNLM_Model(LanguageModel):
                    a tensor of shape (batch_size, hidden_size)
         """
         ### YOUR CODE HERE
-        raise NotImplementedError
+        self.initial_state = tf.zeros((self.config.batch_size, self.config.hidden_size))
+        h = self.initial_state
+        rnn_outputs = []
+        with tf.variable_scope("RNN"):
+            for i in xrange(self.config.num_steps):
+                if i > 0:
+                    tf.get_variable_scope().reuse_variables()
+                H = tf.get_variable("H", shape=(self.config.hidden_size, self.config.hidden_size),
+                                    initializer=tf.zeros_initializer)
+                I = tf.get_variable("I", shape=(self.config.embed_size, self.config.hidden_size),
+                                    initializer=tf.zeros_initializer)
+                b1 = tf.get_variable("b1", shape=(self.config.hidden_size,), initializer=tf.zeros_initializer)
+                h = tf.sigmoid(tf.matmul(h, H) + tf.matmul(inputs[i], I) + b1)
+                h = tf.nn.dropout(h, self.dropout_placeholder)
+                rnn_outputs.append(h)
+
+        self.final_state = h
         ### END YOUR CODE
         return rnn_outputs
 

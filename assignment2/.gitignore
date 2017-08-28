@@ -4,3 +4,5 @@ weights/
 .DS_Store
 *.pyc
 *.npy
+ptb_*
+checkpoint

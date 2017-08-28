@@ -122,11 +122,17 @@ class NERModel(LanguageModel):
           feed_dict: The feed dictionary mapping from placeholders to values.
         """
         ### YOUR CODE HERE
-        feed_dict = {
-            self.input_placeholder: input_batch,
-            self.labels_placeholder: label_batch,
-            self.dropout_placeholder: dropout
-        }
+        if (np.any(label_batch)):
+            feed_dict = {
+                self.input_placeholder: input_batch,
+                self.labels_placeholder: label_batch,
+                self.dropout_placeholder: dropout
+            }
+        else:
+            feed_dict = {
+                self.input_placeholder: input_batch,
+                self.dropout_placeholder: dropout
+            }
         ### END YOUR CODE
         return feed_dict
 
@@ -201,7 +207,7 @@ class NERModel(LanguageModel):
 
         h = tf.tanh(tf.matmul(window, W) + b1)
         h_dp = tf.nn.dropout(h, keep_prob=self.dropout_placeholder)
-        output = tf.nn.softmax(tf.matmul(h_dp, U) + b2)
+        output = tf.matmul(h_dp, U) + b2
         ### END YOUR CODE
         return output
 
