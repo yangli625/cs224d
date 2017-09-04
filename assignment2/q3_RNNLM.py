@@ -8,6 +8,8 @@ from copy import deepcopy
 from utils import calculate_perplexity, get_ptb_dataset, Vocab
 from utils import ptb_iterator, sample
 
+from q2_initialization import xavier_weight_init
+
 import tensorflow as tf
 from model import LanguageModel
 
@@ -29,8 +31,9 @@ class Config(object):
     num_steps = 10
     max_epochs = 16
     early_stopping = 2
-    dropout = 0.9
-    lr = 0.001
+    dropout = 0.5
+    lr = 0.005
+    # Tried different settings, but never able to get more than 10 epochs, and validation pp never less than 700
 
 
 class RNNLM_Model(LanguageModel):
@@ -81,7 +84,7 @@ class RNNLM_Model(LanguageModel):
         """
         ### YOUR CODE HERE
         self.input_placeholder = tf.placeholder(dtype=tf.int32, shape=(None, self.config.num_steps))
-        self.labels_placeholder = tf.placeholder(dtype=tf.float32, shape=(None, self.config.num_steps))
+        self.labels_placeholder = tf.placeholder(dtype=tf.int32, shape=(None, self.config.num_steps))
         self.dropout_placeholder = tf.placeholder(dtype=tf.float32, shape=())
         ### END YOUR CODE
 
@@ -102,16 +105,17 @@ class RNNLM_Model(LanguageModel):
                   a tensor of shape (batch_size, embed_size).
         """
         # The embedding lookup is currently only implemented for the CPU
-        with tf.device('/cpu:0'):
-            ### YOUR CODE HERE
-            with tf.variable_scope("embedding"):
-                L = tf.get_variable("L", shape=(len(self.vocab), self.config.embed_size))
-            inputs = tf.nn.embedding_lookup(L, self.input_placeholder)
-            inputs = tf.split(inputs, self.config.num_steps, 1)
-            for i in range(len(inputs)):
-                inputs[i] = tf.squeeze(inputs[i], [1])
-            ### END YOUR CODE
-            return inputs
+        # with tf.device('/cpu:0'):
+        ### YOUR CODE HERE
+        with tf.variable_scope("embedding"):
+            L = tf.get_variable("L", shape=(len(self.vocab), self.config.embed_size), initializer=tf.random_uniform_initializer(-1, 1))
+            tf.get_variable_scope().reuse_variables()
+        inputs = tf.nn.embedding_lookup(L, self.input_placeholder)
+        inputs = tf.split(inputs, self.config.num_steps, 1)
+        for i in range(len(inputs)):
+            inputs[i] = tf.squeeze(inputs[i], [1])
+        ### END YOUR CODE
+        return inputs
 
     def add_projection(self, rnn_outputs):
         """Adds a projection layer.
@@ -134,9 +138,9 @@ class RNNLM_Model(LanguageModel):
         """
         ### YOUR CODE HERE
         with tf.variable_scope("Projection"):
-            U = tf.get_variable("U", shape=(self.config.hidden_size, len(self.vocab)),
-                                initializer=tf.zeros_initializer)
+            U = tf.get_variable("U", shape=(self.config.hidden_size, len(self.vocab)), initializer=xavier_weight_init())
             b2 = tf.get_variable("b2", shape=(len(self.vocab),), initializer=tf.zeros_initializer)
+            tf.get_variable_scope().reuse_variables()
 
         outputs = []
         for rnn_step in rnn_outputs:
@@ -159,7 +163,7 @@ class RNNLM_Model(LanguageModel):
         target_weights = tf.ones((self.config.batch_size, self.config.num_steps))
         loss = tf.contrib.seq2seq.sequence_loss(
             output,
-            tf.to_int32(self.labels_placeholder),
+            self.labels_placeholder,
             target_weights
         )
         ### END YOUR CODE
@@ -191,6 +195,7 @@ class RNNLM_Model(LanguageModel):
         with tf.variable_scope("optimizer"):
             opt = tf.train.AdamOptimizer(learning_rate=self.config.lr)
             train_op = opt.minimize(loss)
+            tf.get_variable_scope().reuse_variables()
         ### END YOUR CODE
         return train_op
 
@@ -252,23 +257,23 @@ class RNNLM_Model(LanguageModel):
                    a tensor of shape (batch_size, hidden_size)
         """
         ### YOUR CODE HERE
-        self.initial_state = tf.zeros((self.config.batch_size, self.config.hidden_size))
-        h = self.initial_state
-        rnn_outputs = []
         with tf.variable_scope("RNN"):
+            self.initial_state = tf.zeros((self.config.batch_size, self.config.hidden_size))
+            h = self.initial_state
+            rnn_outputs = []
             for i in xrange(self.config.num_steps):
-                if i > 0:
-                    tf.get_variable_scope().reuse_variables()
                 H = tf.get_variable("H", shape=(self.config.hidden_size, self.config.hidden_size),
-                                    initializer=tf.zeros_initializer)
+                                    initializer=xavier_weight_init())
                 I = tf.get_variable("I", shape=(self.config.embed_size, self.config.hidden_size),
-                                    initializer=tf.zeros_initializer)
+                                    initializer=xavier_weight_init())
                 b1 = tf.get_variable("b1", shape=(self.config.hidden_size,), initializer=tf.zeros_initializer)
                 h = tf.sigmoid(tf.matmul(h, H) + tf.matmul(inputs[i], I) + b1)
-                h = tf.nn.dropout(h, self.dropout_placeholder)
                 rnn_outputs.append(h)
+                tf.get_variable_scope().reuse_variables()
 
-        self.final_state = h
+        self.final_state = rnn_outputs[-1]
+        with tf.variable_scope("RNNDropout"):
+            rnn_outputs = [tf.nn.dropout(output, self.dropout_placeholder) for output in rnn_outputs]
         ### END YOUR CODE
         return rnn_outputs
 
@@ -325,11 +330,24 @@ def generate_text(session, model, config, starting_text='<eos>',
     state = model.initial_state.eval()
     # Imagine tokens as a batch size of one, length of len(tokens[0])
     tokens = [model.vocab.encode(word) for word in starting_text.split()]
+
+    for token in tokens[:-1]:
+        feed = {
+            model.input_placeholder: np.expand_dims([token], axis=0),
+            model.initial_state: state,
+            model.dropout_placeholder: 1.0
+        }
+        state = session.run(model.final_state, feed_dict=feed)
     for i in xrange(stop_length):
         ### YOUR CODE HERE
-        raise NotImplementedError
+        feed = {
+            model.input_placeholder: np.expand_dims([tokens[-1]], axis=0),
+            model.initial_state: state,
+            model.dropout_placeholder: 1.0
+        }
+        y_pred, state = session.run([model.predictions, model.final_state], feed_dict=feed)
         ### END YOUR CODE
-        next_word_idx = sample(y_pred[0], temperature=temp)
+        next_word_idx = sample(y_pred[0][0], temperature=temp)
         tokens.append(next_word_idx)
         if stop_tokens and model.vocab.decode(tokens[-1]) in stop_tokens:
             break
@@ -357,38 +375,36 @@ def test_RNNLM():
     saver = tf.train.Saver()
 
     with tf.Session() as session:
-        best_val_pp = float('inf')
-        best_val_epoch = 0
+        with tf.device('/gpu:0'):
+            best_val_pp = float('inf')
+            best_val_epoch = 0
 
-        session.run(init)
-        for epoch in xrange(config.max_epochs):
-            print 'Epoch {}'.format(epoch)
-            start = time.time()
-            ###
-            train_pp = model.run_epoch(
-                session, model.encoded_train,
-                train_op=model.train_step)
-            valid_pp = model.run_epoch(session, model.encoded_valid)
-            print 'Training perplexity: {}'.format(train_pp)
-            print 'Validation perplexity: {}'.format(valid_pp)
-            if valid_pp < best_val_pp:
-                best_val_pp = valid_pp
-                best_val_epoch = epoch
-                saver.save(session, './ptb_rnnlm.weights')
-            if epoch - best_val_epoch > config.early_stopping:
-                break
-            print 'Total time: {}'.format(time.time() - start)
+            session.run(init)
+            for epoch in xrange(config.max_epochs):
+                print 'Epoch {}'.format(epoch)
+                start = time.time()
+                train_pp = model.run_epoch(session, model.encoded_train, train_op=model.train_step)
+                valid_pp = model.run_epoch(session, model.encoded_valid)
+                print 'Training perplexity: {}'.format(train_pp)
+                print 'Validation perplexity: {}'.format(valid_pp)
+                if valid_pp < best_val_pp:
+                    best_val_pp = valid_pp
+                    best_val_epoch = epoch
+                    saver.save(session, './ptb_rnnlm.weights')
+                if epoch - best_val_epoch > config.early_stopping:
+                    break
+                print 'Total time: {}'.format(time.time() - start)
 
-        saver.restore(session, 'ptb_rnnlm.weights')
-        test_pp = model.run_epoch(session, model.encoded_test)
-        print '=-=' * 5
-        print 'Test perplexity: {}'.format(test_pp)
-        print '=-=' * 5
-        starting_text = 'in palo alto'
-        while starting_text:
-            print ' '.join(generate_sentence(
-                session, gen_model, gen_config, starting_text=starting_text, temp=1.0))
-            starting_text = raw_input('> ')
+            saver.restore(session, 'ptb_rnnlm.weights')
+            test_pp = model.run_epoch(session, model.encoded_test)
+            print '=-=' * 5
+            print 'Test perplexity: {}'.format(test_pp)
+            print '=-=' * 5
+            starting_text = 'in palo alto'
+            while starting_text:
+                print ' '.join(generate_sentence(
+                    session, gen_model, gen_config, starting_text=starting_text, temp=1.0))
+                starting_text = raw_input('> ')
 
 if __name__ == "__main__":
     test_RNNLM()
