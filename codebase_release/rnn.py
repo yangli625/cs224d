@@ -10,8 +10,9 @@ import tensorflow as tf
 import tree as tr
 from utils import Vocab
 
+tf.logging.set_verbosity(tf.logging.ERROR)
 
-RESET_AFTER = 50
+RESET_AFTER = 50000
 class Config(object):
     """Holds model hyperparams and data information.
        Model objects are passed a Config() object at instantiation.
@@ -37,6 +38,10 @@ class RNN_Model():
         self.vocab = Vocab()
         train_sents = [t.get_words() for t in self.train_data]
         self.vocab.construct(list(itertools.chain.from_iterable(train_sents)))
+        dev_sents = [t.get_words() for t in self.dev_data]
+        self.vocab.construct(list(itertools.chain.from_iterable(dev_sents)))
+        test_sents = [t.get_words() for t in self.test_data]
+        self.vocab.construct(list(itertools.chain.from_iterable(test_sents)))
 
     def inference(self, tree, predict_only_root=False):
         """For a given tree build the RNN models computation graph up to where it
@@ -51,7 +56,7 @@ class RNN_Model():
             node_tensors = node_tensors[tree.root]
         else:
             node_tensors = [tensor for node, tensor in node_tensors.iteritems() if node.label!=2]
-            node_tensors = tf.concat(0, node_tensors)
+            node_tensors = tf.concat(node_tensors, 0)
         return self.add_projections(node_tensors)
 
     def add_model_vars(self):
@@ -69,11 +74,21 @@ class RNN_Model():
         '''
         with tf.variable_scope('Composition'):
             ### YOUR CODE HERE
-            pass
+            tf.get_variable("embedding", shape=(len(self.vocab), Config.embed_size),
+                            initializer=tf.random_uniform_initializer(-1, 1))
+            tf.get_variable("W1", shape=(2 * Config.embed_size, Config.embed_size),
+                            initializer=tf.random_normal_initializer,
+                            regularizer=tf.contrib.layers.l2_regularizer(Config.l2 / 2))
+            tf.get_variable("b1", shape=(1, Config.embed_size),
+                            initializer=tf.zeros_initializer)
             ### END YOUR CODE
         with tf.variable_scope('Projection'):
             ### YOUR CODE HERE
-            pass
+            tf.get_variable("U", shape=(Config.embed_size, Config.label_size),
+                            initializer=tf.random_normal_initializer,
+                            regularizer=tf.contrib.layers.l2_regularizer(Config.l2 / 2))
+            tf.get_variable("bs", shape=(1, Config.label_size),
+                            initializer=tf.zeros_initializer)
             ### END YOUR CODE
 
     def add_model(self, node):
@@ -93,7 +108,9 @@ class RNN_Model():
         """
         with tf.variable_scope('Composition', reuse=True):
             ### YOUR CODE HERE
-            pass
+            L = tf.get_variable("embedding")
+            W1 = tf.get_variable("W1")
+            b1 = tf.get_variable("b1")
             ### END YOUR CODE
 
 
@@ -101,13 +118,16 @@ class RNN_Model():
         curr_node_tensor = None
         if node.isLeaf:
             ### YOUR CODE HERE
-            pass
+            curr_node_tensor = tf.expand_dims(L[self.vocab.word_to_index[node.word], :], axis=0)
             ### END YOUR CODE
         else:
             node_tensors.update(self.add_model(node.left))
             node_tensors.update(self.add_model(node.right))
             ### YOUR CODE HERE
-            pass
+            left_tensor = node_tensors[node.left]
+            right_tensor = node_tensors[node.right]
+            h = tf.concat([left_tensor, right_tensor], axis=1)
+            curr_node_tensor = tf.nn.tanh(tf.matmul(h, W1) + b1)
             ### END YOUR CODE
         node_tensors[node] = curr_node_tensor
         return node_tensors
@@ -123,7 +143,10 @@ class RNN_Model():
         """
         logits = None
         ### YOUR CODE HERE
-        pass
+        with tf.variable_scope('Projection', reuse=True):
+            U = tf.get_variable("U")
+            bs = tf.get_variable("bs")
+        logits = tf.matmul(node_tensors, U) + bs
         ### END YOUR CODE
         return logits
 
@@ -140,7 +163,8 @@ class RNN_Model():
         """
         loss = None
         # YOUR CODE HERE
-        pass
+        loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=labels, logits=logits))
+        loss += sum(tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES))
         # END YOUR CODE
         return loss
 
@@ -165,7 +189,7 @@ class RNN_Model():
         """
         train_op = None
         # YOUR CODE HERE
-        pass
+        train_op = tf.train.GradientDescentOptimizer(learning_rate=Config.lr).minimize(loss)
         # END YOUR CODE
         return train_op
 
@@ -179,7 +203,7 @@ class RNN_Model():
         """
         predictions = None
         # YOUR CODE HERE
-        pass
+        predictions = tf.argmax(y, axis=1)
         # END YOUR CODE
         return predictions
 
@@ -187,7 +211,7 @@ class RNN_Model():
         self.config = config
         self.load_data()
 
-    def predict(self, trees, weights_path, get_loss = False):
+    def predict(self, trees, weights_path, get_loss=False):
         """Make predictions from the provided model."""
         results = []
         losses = []
@@ -207,7 +231,7 @@ class RNN_Model():
                     results.append(root_prediction)
         return results, losses
 
-    def run_epoch(self, new_model = False, verbose=True):
+    def run_epoch(self, new_model=False, verbose=True):
         step = 0
         loss_history = []
         while step < len(self.train_data):
@@ -238,12 +262,13 @@ class RNN_Model():
                 if not os.path.exists("./weights"):
                     os.makedirs("./weights")
                 saver.save(sess, './weights/%s.temp'%self.config.model_name)
-        train_preds, _ = self.predict(self.train_data, './weights/%s.temp'%self.config.model_name)
-        val_preds, val_losses = self.predict(self.dev_data, './weights/%s.temp'%self.config.model_name, get_loss=True)
-        train_labels = [t.root.label for t in self.train_data]
+
+        val_preds, val_losses = self.predict(self.dev_data, './weights/%s.temp' % self.config.model_name, get_loss=True)
         val_labels = [t.root.label for t in self.dev_data]
-        train_acc = np.equal(train_preds, train_labels).mean()
         val_acc = np.equal(val_preds, val_labels).mean()
+        train_preds, _ = self.predict(self.train_data, './weights/%s.temp'%self.config.model_name)
+        train_labels = [t.root.label for t in self.train_data]
+        train_acc = np.equal(train_preds, train_labels).mean()
 
         print
         print 'Training acc (only root node): {}'.format(train_acc)
