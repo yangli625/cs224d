@@ -12,7 +12,7 @@ from utils import Vocab
 
 tf.logging.set_verbosity(tf.logging.ERROR)
 
-RESET_AFTER = 50000
+RESET_AFTER = 50
 class Config(object):
     """Holds model hyperparams and data information.
        Model objects are passed a Config() object at instantiation.
@@ -23,7 +23,7 @@ class Config(object):
     anneal_threshold = 0.99
     anneal_by = 1.5
     max_epochs = 30
-    lr = 0.01
+    lr = 0.05
     l2 = 0.02
     model_name = 'rnn_embed=%d_l2=%f_lr=%f.weights'%(embed_size, l2, lr)
 
@@ -304,9 +304,14 @@ class RNN_Model():
 
             #save if model has improved on val
             if val_loss < best_val_loss:
-                 shutil.copyfile('./weights/%s.temp'%self.config.model_name, './weights/%s'%self.config.model_name)
-                 best_val_loss = val_loss
-                 best_val_epoch = epoch
+                shutil.copyfile('./weights/%s.temp.data-00000-of-00001' % self.config.model_name,
+                                './weights/%s.data-00000-of-00001' % self.config.model_name)
+                shutil.copyfile('./weights/%s.temp.index' % self.config.model_name,
+                                './weights/%s.index' % self.config.model_name)
+                shutil.copyfile('./weights/%s.temp.meta' % self.config.model_name,
+                                './weights/%s.meta' % self.config.model_name)
+                best_val_loss = val_loss
+                best_val_epoch = epoch
 
             # if model has not imprvoved for a while stop
             if epoch - best_val_epoch > self.config.early_stopping:
