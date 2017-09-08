@@ -26,6 +26,7 @@ class Config(object):
     lr = 0.05
     l2 = 0.02
     model_name = 'rnn_embed=%d_l2=%f_lr=%f.weights'%(embed_size, l2, lr)
+    # after a day of training, I got train acc = 0.92 and validation acc = 0.77, but test acc = 0.57
 
 
 class RNN_Model():
@@ -217,6 +218,11 @@ class RNN_Model():
         losses = []
         for i in xrange(int(math.ceil(len(trees)/float(RESET_AFTER)))):
             with tf.Graph().as_default(), tf.Session() as sess:
+                """ 
+                here tf.Graph().as_default() is used for multiple graphs. 
+                In this model, each tree is a new graph, and we keep every RESET_AFTER trees in one context using as_default().
+                Thus, we also need to restart a session once a while to release some memory.
+                """
                 self.add_model_vars()
                 saver = tf.train.Saver()
                 saver.restore(sess, weights_path)
